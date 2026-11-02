@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <radialGradient id="whaleGrad" cx="38%" cy="28%" r="68%">
+      <stop offset="0%" stop-color="#62B6FF"/>
+      <stop offset="55%" stop-color="#2B6FE8"/>
+      <stop offset="100%" stop-color="#103478"/>
+    </radialGradient>
+    <linearGradient id="bellyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#F0F7FF"/>
+      <stop offset="100%" stop-color="#C8E1FF"/>
+    </linearGradient>
+  </defs>
+  <!-- Deep ocean aura ring -->
+  <circle cx="50" cy="54" r="42" fill="none" stroke="#53B2FF" stroke-width="1.8" stroke-dasharray="5 4" opacity="0.55"/>
+  <!-- Whale tail -->
+  <path d="M76 58 Q92 44 95 34 Q88 52 82 58 Q90 64 95 76 Q82 68 74 62 Z" fill="#2B6FE8"/>
+  <!-- Whale rounded body -->
+  <path d="M16 54 C16 32, 34 22, 56 24 C74 26, 82 40, 80 56 C78 70, 64 78, 44 78 C24 78, 16 68, 16 54 Z" fill="url(#whaleGrad)" stroke="#18479E" stroke-width="2"/>
+  <!-- Cute belly -->
+  <path d="M20 58 Q46 64 74 58 C68 72, 54 77, 42 77 C27 77, 20 69, 20 58 Z" fill="url(#bellyGrad)"/>
+  <!-- Cute anime eyes -->
+  <ellipse cx="35" cy="48" rx="4.2" ry="5" fill="#0B1E42"/>
+  <circle cx="33.8" cy="46.2" r="1.6" fill="#FFFFFF"/>
+  <ellipse cx="55" cy="48" rx="4.2" ry="5" fill="#0B1E42"/>
+  <circle cx="53.8" cy="46.2" r="1.6" fill="#FFFFFF"/>
+  <!-- Blush -->
+  <ellipse cx="29" cy="54" rx="3.5" ry="1.8" fill="#FF8DA1" opacity="0.65"/>
+  <ellipse cx="61" cy="54" rx="3.5" ry="1.8" fill="#FF8DA1" opacity="0.65"/>
+  <!-- Water spout -->
+  <path d="M46 22 Q42 10 32 12 M46 22 Q50 8 60 12" fill="none" stroke="#7FD1FF" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,14 @@
+- insert:
+    - id: whale
+      name: dsh-plugin-whale
+      config:
+        defaultSound: 'whale_deep'
+        accompanimentIntervalMs: 1200
+        autoKnockMaxDurationMs: 1800000
+        voiceEnabled: true
+        voiceRate: 0.92
+        voicePitch: 1.05
+        volume: 1.0
+        tokenKnockEnabled: true
+        tokensPerMerit: 10000
+        modelUrl: ''
