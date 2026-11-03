@@ -347,19 +347,34 @@ export class WhaleSpeechSynthesizer {
     }
     this.synth.cancel()
 
-    const utterance = new SpeechSynthesisUtterance(text)
+    // Clean text for optimal TTS English pronunciation when using Chinese voices
+    let spokenText = text
+      .replace(/([a-zA-Z0-9])_([a-zA-Z0-9])/g, '$1 $2')
+      .replace(/([一-龥])([a-zA-Z0-9])/g, '$1 $2')
+      .replace(/([a-zA-Z0-9])([一-龥])/g, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    const utterance = new SpeechSynthesisUtterance(spokenText)
+    const hasChinese = /[一-龥]/.test(spokenText)
+    const hasLatin = /[a-zA-Z]/.test(spokenText)
+
     if (this.voice) {
       utterance.voice = this.voice
       utterance.lang = this.voice.lang || 'zh-CN'
     } else {
-      utterance.lang = 'zh-CN'
+      utterance.lang = hasChinese ? 'zh-CN' : 'en-US'
     }
-    utterance.rate = clamp(this.rate, 1.0, 0.1, 2.0)
+
+    // Slightly moderate rate when reading English words with Chinese voices to prevent swallowing
+    const baseRate = clamp(this.rate, 1.0, 0.1, 2.0)
+    const adjustedRate = (hasLatin && !hasChinese) ? Math.min(1.0, baseRate) : baseRate
+    utterance.rate = adjustedRate
     utterance.pitch = clamp(this.pitch, 1.2, 0.1, 2.0)
     utterance.volume = clamp(this.volume, 1.0, 0.0, 1.0)
 
     this.activeSpeaking = true
-    this.onSpeakStart?.(text)
+    this.onSpeakStart?.(spokenText)
 
     let finished = false
     const done = () => {
@@ -380,7 +395,9 @@ export class WhaleSpeechSynthesizer {
     utterance.onend = done
     utterance.onerror = done
 
-    const expectedDurationMs = Math.max(1800, (text.length / 3.2) * 1000 + 1200)
+    // Generous timeout to allow complete English multi-syllable pronunciation
+    const syllableFactor = hasLatin ? 2.0 : 2.8
+    const expectedDurationMs = Math.max(2500, (spokenText.length / syllableFactor) * 1000 + 2000)
     this.fallbackTimer = setTimeout(() => {
       if (!finished) {
         done()

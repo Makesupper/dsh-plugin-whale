@@ -27,11 +27,22 @@ export function sanitizeLlmTextForSpeech(raw: string): string {
   text = text.replace(/https?:\/\/[^\s)]+/g, ' ')
   // Strip HTML tags
   text = text.replace(/<[^>]+>/g, ' ')
-  // Remove heading hashes, blockquote markers, list bullets, bold/italic stars
+  // Remove heading hashes, blockquote markers, list bullets
   text = text.replace(/^\s*#{1,6}\s+/gm, '')
   text = text.replace(/^\s*>\s+/gm, '')
   text = text.replace(/^\s*[-*+]\s+/gm, '')
-  text = text.replace(/[*_~]+/g, '')
+
+  // Expand code symbols that cause speech engines to stumble or swallow words
+  text = text.replace(/([a-zA-Z0-9])_([a-zA-Z0-9])/g, '$1 $2')
+  text = text.replace(/::|->|=>|===|!==/g, ' ')
+  text = text.replace(/([a-zA-Z0-9])\/([a-zA-Z0-9])/g, '$1 $2')
+  text = text.replace(/[*~]+/g, '')
+
+  // Insert space between Chinese and English/Numbers, and English/Numbers and Chinese
+  // This allows browser TTS engines to cleanly switch pronunciation dictionary and speak full English words
+  text = text.replace(/([\u4e00-\u9fa5])([a-zA-Z0-9])/g, '$1 $2')
+  text = text.replace(/([a-zA-Z0-9])([\u4e00-\u9fa5])/g, '$1 $2')
+
   // Collapse horizontal whitespace
   text = text.replace(/[ \t\r]+/g, ' ')
   return text.trim()
@@ -45,8 +56,9 @@ export function splitTextIntoSpeechSentences(raw: string): string[] {
   const cleaned = sanitizeLlmTextForSpeech(raw)
   if (!cleaned) return []
 
+  // Split on Chinese sentence delimiters or English periods followed by space/caps
   const parts = cleaned
-    .split(/(?<=[。！？；!?;。\n])\s*/)
+    .split(/(?<=[。！？；!?;。\n]|\.(?=\s+[A-Z\u4e00-\u9fa5]|$))\s*/)
     .map(s => s.replace(/\s+/g, ' ').trim())
     .filter(Boolean)
 
@@ -54,8 +66,13 @@ export function splitTextIntoSpeechSentences(raw: string): string[] {
   const pushChunked = (chunk: string) => {
     let rest = chunk.trim()
     while (rest.length > MAX_SENTENCE_LENGTH) {
-      result.push(rest.slice(0, MAX_SENTENCE_LENGTH))
-      rest = rest.slice(MAX_SENTENCE_LENGTH).trim()
+      // Find space boundary to avoid cutting English words in half
+      let cutIdx = rest.lastIndexOf(' ', MAX_SENTENCE_LENGTH)
+      if (cutIdx < MAX_SENTENCE_LENGTH * 0.6) {
+        cutIdx = MAX_SENTENCE_LENGTH
+      }
+      result.push(rest.slice(0, cutIdx).trim())
+      rest = rest.slice(cutIdx).trim()
     }
     if (rest.length > 0) {
       result.push(rest)

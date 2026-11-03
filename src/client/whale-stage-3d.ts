@@ -45,11 +45,15 @@ export class WhaleStage3D {
   private canvas: HTMLCanvasElement | null = null
   private externalSlot: HTMLElement | null = null
   private rafId: number | null = null
+  private viewCanvases: HTMLCanvasElement[] = []
   private startTime: number = Date.now()
+  private lastFrameTime: number | null = null
   private speaking: boolean = false
   private mouthLevel: number = 0
   private targetMouthLevel: number = 0
   private knockBounce: number = 0
+  private static readonly MAX_LOOK_YAW: number = 0.45
+  private static readonly MAX_LOOK_PITCH: number = 0.18
   private lookYaw: number = 0
   private lookPitch: number = 0
   private modelUrl: string = ''
@@ -75,6 +79,7 @@ export class WhaleStage3D {
 
   public mount(container: HTMLElement): void {
     this.container = container
+    this.lastFrameTime = null
     const canvas = document.createElement('canvas')
     canvas.className = 'dsh-whale-3d-canvas'
     // Supersample the small widget so the lace and eye contours stay crisp.
@@ -110,8 +115,10 @@ export class WhaleStage3D {
   }
 
   public setPointerLook(normX: number, normY: number): void {
-    this.lookYaw = Math.max(-0.45, Math.min(0.45, normX * 0.4))
-    this.lookPitch = Math.max(-0.24, Math.min(0.24, normY * 0.22))
+    const maxYaw = WhaleStage3D.MAX_LOOK_YAW
+    const maxPitch = WhaleStage3D.MAX_LOOK_PITCH
+    this.lookYaw = Math.max(-maxYaw, Math.min(maxYaw, normX * maxYaw))
+    this.lookPitch = Math.max(-maxPitch, Math.min(maxPitch, normY * maxPitch))
   }
 
   public setSpeaking(active: boolean, level: number = 0.65): void {
@@ -222,27 +229,33 @@ export class WhaleStage3D {
 
     const w = 240
     const h = 180
+    const now = Date.now()
+    const frameScale = this.lastFrameTime === null
+      ? 1
+      : Math.min(3, Math.max(0, (now - this.lastFrameTime) / (1000 / 60)))
+    this.lastFrameTime = now
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
     ctx.save()
     ctx.scale(this.canvas.width / w, this.canvas.height / h)
 
-    const elapsed = (Date.now() - this.startTime) * 0.001
+    const elapsed = (now - this.startTime) * 0.001
     const breathY = Math.sin(elapsed * 2.4) * 0.038
-    const idleYaw = Math.sin(elapsed * 1.25) * 0.08 + this.lookYaw
-    const idlePitch = Math.cos(elapsed * 1.6) * 0.035 + this.lookPitch
-    const idleRoll = Math.sin(elapsed * 1.05) * 0.032
+    const maxTotalYaw = WhaleStage3D.MAX_LOOK_YAW + 0.08
+    const idleYaw = Math.max(-maxTotalYaw, Math.min(maxTotalYaw, Math.sin(elapsed * 1.25) * 0.06 + this.lookYaw))
+    const idlePitch = Math.cos(elapsed * 1.6) * 0.028 + this.lookPitch
+    const idleRoll = Math.sin(elapsed * 1.05) * 0.024
 
     if (this.knockBounce > 0.001) {
-      this.knockBounce *= 0.84
+      this.knockBounce *= Math.pow(0.84, frameScale)
     } else {
       this.knockBounce = 0
     }
 
     if (this.speaking) {
       const wave = 0.35 + 0.65 * Math.abs(Math.sin(elapsed * 11.5))
-      this.mouthLevel += (this.targetMouthLevel * wave - this.mouthLevel) * 0.35
+      this.mouthLevel += (this.targetMouthLevel * wave - this.mouthLevel) * (1 - Math.pow(0.65, frameScale))
     } else {
-      this.mouthLevel *= 0.78
+      this.mouthLevel *= Math.pow(0.78, frameScale)
     }
 
     const centerY = 0.12 + breathY + this.knockBounce * 0.065
@@ -250,8 +263,8 @@ export class WhaleStage3D {
     // 1. Render 3D Horizontal Sonar Ripples beneath the Whale Girl
     for (let i = this.ripples.length - 1; i >= 0; i--) {
       const r = this.ripples[i]
-      r.radius += 0.028
-      r.alpha *= 0.93
+      r.radius += 0.028 * frameScale
+      r.alpha *= Math.pow(0.93, frameScale)
       if (r.alpha <= 0.03 || r.radius >= r.maxRadius) {
         this.ripples.splice(i, 1)
         continue
@@ -276,7 +289,7 @@ export class WhaleStage3D {
 
     // 2. Render Rising 3D Deep-Sea Bubbles
     for (const b of this.bubbles) {
-      b.y += b.speed
+      b.y += b.speed * frameScale
       if (b.y > 0.95) {
         b.y = -0.85
       }
@@ -290,74 +303,196 @@ export class WhaleStage3D {
       ctx.restore()
     }
 
-    // Shared design coordinates keep the head, clothes, and hair in proportion.
-    this.drawCharacter(ctx, w, h, elapsed, idleYaw, idlePitch, idleRoll)
-
-    // 4. Floating 3D Brushed Stainless Steel Plate (不锈钢盘) beside the Whale Girl
-    const platePulse = 1 + this.knockBounce * 0.32
-    const plate3D = this.rotate3D(
-      { x: -1.02, y: centerY - 0.26 + this.knockBounce * 0.12, z: 0.28 },
+    const plate = this.rotate3D(
+      { x: -0.22, y: centerY - 0.43 + this.knockBounce * 0.12, z: 0.62 },
       idlePitch * 0.5,
-      idleYaw * 0.5,
+      idleYaw,
       -0.06
     )
-    const rp = this.project(plate3D, w, h)
-    const ps = rp.scale * 0.78
-    ctx.save()
-    ctx.translate(rp.x, rp.y)
-    ctx.scale(platePulse, platePulse)
+    if (plate.z < 0) this.drawPlate(ctx, w, h, plate, idleYaw)
+    this.drawCharacter(ctx, w, h, elapsed, idleYaw, idlePitch, idleRoll)
+    if (plate.z >= 0) this.drawPlate(ctx, w, h, plate, idleYaw)
 
-    // 4a. Stainless Steel Plate Under-base Shadow / Bevel Lip
-    const baseMetalGrad = ctx.createLinearGradient(-15 * ps, 0, 15 * ps, 6 * ps)
-    baseMetalGrad.addColorStop(0, '#475569')
-    baseMetalGrad.addColorStop(0.45, '#CBD5E1')
-    baseMetalGrad.addColorStop(0.75, '#64748B')
-    baseMetalGrad.addColorStop(1, '#334155')
-    ctx.fillStyle = baseMetalGrad
+    ctx.restore()
+  }
+
+  private drawPlate(
+    ctx: CanvasRenderingContext2D, width: number, height: number,
+    plate: Vec3, yaw: number
+  ): void {
+    const pulse = 1 + this.knockBounce * 0.32
+    const projected = this.project(plate, width, height)
+    const scale = projected.scale * 0.78
+    const yawWidth = Math.max(0.12, Math.abs(Math.cos(yaw)))
+    ctx.save()
+    ctx.translate(projected.x, projected.y)
+    ctx.scale(pulse * yawWidth, pulse)
+
+    const base = ctx.createLinearGradient(-15 * scale, 0, 15 * scale, 6 * scale)
+    base.addColorStop(0, '#475569')
+    base.addColorStop(0.45, '#CBD5E1')
+    base.addColorStop(0.75, '#64748B')
+    base.addColorStop(1, '#334155')
+    ctx.fillStyle = base
     ctx.beginPath()
-    ctx.ellipse(0, 2.6 * ps, 14.5 * ps, 5.8 * ps, 0, 0, Math.PI * 2)
+    ctx.ellipse(0, 2.6 * scale, 14.5 * scale, 5.8 * scale, 0, 0, Math.PI * 2)
     ctx.fill()
 
-    // 4b. Wide Flanged Brushed Stainless Steel Rim (银白金属拉丝宽折边盘沿)
-    const rimGrad = ctx.createLinearGradient(-16 * ps, -5 * ps, 16 * ps, 5 * ps)
-    rimGrad.addColorStop(0, '#94A3B8')
-    rimGrad.addColorStop(0.25, '#F8FAFC')
-    rimGrad.addColorStop(0.5, '#CBD5E1')
-    rimGrad.addColorStop(0.78, '#FFFFFF')
-    rimGrad.addColorStop(1, '#64748B')
-    ctx.fillStyle = rimGrad
+    const rim = ctx.createLinearGradient(-16 * scale, -5 * scale, 16 * scale, 5 * scale)
+    rim.addColorStop(0, '#94A3B8')
+    rim.addColorStop(0.25, '#F8FAFC')
+    rim.addColorStop(0.5, '#CBD5E1')
+    rim.addColorStop(0.78, '#FFFFFF')
+    rim.addColorStop(1, '#64748B')
+    ctx.fillStyle = rim
     ctx.beginPath()
-    ctx.ellipse(0, 0, 15.8 * ps, 6.2 * ps, 0, 0, Math.PI * 2)
+    ctx.ellipse(0, 0, 15.8 * scale, 6.2 * scale, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.strokeStyle = '#475569'
-    ctx.lineWidth = 0.95 * ps
+    ctx.lineWidth = 0.95 * scale
     ctx.stroke()
 
-    // 4c. Recessed Inner Metallic Dish Well (内凹不锈钢盘底反光区)
-    const wellGrad = ctx.createLinearGradient(-11 * ps, -3 * ps, 11 * ps, 4 * ps)
-    wellGrad.addColorStop(0, '#64748B')
-    wellGrad.addColorStop(0.38, '#E2E8F0')
-    wellGrad.addColorStop(0.7, '#94A3B8')
-    wellGrad.addColorStop(1, '#F1F5F9')
-    ctx.fillStyle = wellGrad
+    const well = ctx.createLinearGradient(-11 * scale, -3 * scale, 11 * scale, 4 * scale)
+    well.addColorStop(0, '#64748B')
+    well.addColorStop(0.38, '#E2E8F0')
+    well.addColorStop(0.7, '#94A3B8')
+    well.addColorStop(1, '#F1F5F9')
+    ctx.fillStyle = well
     ctx.beginPath()
-    ctx.ellipse(0, 0.4 * ps, 11.4 * ps, 4.1 * ps, 0, 0, Math.PI * 2)
+    ctx.ellipse(0, 0.4 * scale, 11.4 * scale, 4.1 * scale, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.strokeStyle = '#64748B'
-    ctx.lineWidth = 0.8 * ps
+    ctx.lineWidth = 0.8 * scale
     ctx.stroke()
 
-    // 4d. Specular Metallic Sheen Streak across the stainless steel plate
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'
-    ctx.lineWidth = 1.2 * ps
+    ctx.lineWidth = 1.2 * scale
     ctx.beginPath()
-    ctx.moveTo(-8.5 * ps, -2.0 * ps)
-    ctx.lineTo(-2.5 * ps, 1.8 * ps)
-    ctx.moveTo(3.0 * ps, -1.8 * ps)
-    ctx.lineTo(8.0 * ps, 1.4 * ps)
+    ctx.moveTo(-8.5 * scale, -2 * scale)
+    ctx.lineTo(-2.5 * scale, 1.8 * scale)
+    ctx.moveTo(3 * scale, -1.8 * scale)
+    ctx.lineTo(8 * scale, 1.4 * scale)
     ctx.stroke()
     ctx.restore()
-    ctx.restore()
+  }
+
+  private drawTurningCharacter(
+    ctx: CanvasRenderingContext2D, width: number, height: number,
+    elapsed: number, yaw: number, pitch: number, roll: number
+  ): void {
+    if (typeof document === 'undefined' || typeof ctx.putImageData !== 'function') {
+      this.drawCharacter(ctx, width, height, elapsed, yaw, pitch, roll)
+      return
+    }
+
+    const outputWidth = this.canvas?.width || width
+    const outputHeight = this.canvas?.height || height
+    const scaleX = outputWidth / width
+    const scaleY = outputHeight / height
+    const angles = [0, Math.PI / 2, Math.PI, -Math.PI / 2]
+    const frames: ImageData[] = []
+
+    for (let index = 0; index < angles.length; index++) {
+      let surface = this.viewCanvases[index]
+      if (!surface) {
+        surface = document.createElement('canvas')
+        this.viewCanvases[index] = surface
+      }
+      if (surface.width !== outputWidth) surface.width = outputWidth
+      if (surface.height !== outputHeight) surface.height = outputHeight
+      const surfaceContext = surface.getContext('2d')
+      if (!surfaceContext || typeof surfaceContext.getImageData !== 'function') {
+        this.drawCharacter(ctx, width, height, elapsed, yaw, pitch, roll)
+        return
+      }
+      surfaceContext.clearRect(0, 0, outputWidth, outputHeight)
+      surfaceContext.save()
+      surfaceContext.scale(scaleX, scaleY)
+      this.drawCharacter(surfaceContext, width, height, elapsed, angles[index], pitch, roll)
+      surfaceContext.restore()
+      frames.push(surfaceContext.getImageData(0, 0, outputWidth, outputHeight))
+    }
+
+    const bounds = frames.map(frame => {
+      const rows: Array<[number, number]> = []
+      for (let y = 0; y < outputHeight; y++) {
+        let left = outputWidth
+        let right = -1
+        const rowOffset = y * outputWidth * 4
+        for (let x = 0; x < outputWidth; x++) {
+          if (frame.data[rowOffset + x * 4 + 3] > 8) {
+            left = Math.min(left, x)
+            right = x
+          }
+        }
+        rows.push([left, right])
+      }
+      return rows
+    })
+
+    const result = ctx.createImageData(outputWidth, outputHeight)
+    const resultPixels = result.data
+    const centerX = width * 0.51 * scaleX
+    const centerY = (height * 0.49 + Math.sin(elapsed * 2.4) * 0.9 - this.knockBounce * 1.8) * scaleY
+    const cameraDistance = 420 * scaleY
+    const halfTurn = Math.PI * 0.5
+    const halfPixelWidth = (frameIndex: number, y: number): number => {
+      const [left, right] = bounds[frameIndex][y]
+      return right >= left ? (right - left) * 0.5 : 0
+    }
+
+    for (let y = 0; y < outputHeight; y++) {
+      const rowY = y - centerY
+      const yawNormalized = (yaw % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)
+      const yawSector = Math.round(yawNormalized / halfTurn) % 4
+      const nextYawSector = (yawSector + 1) % 4
+      const yawRemainder = yawNormalized - yawSector * halfTurn
+      const yawBlend = Math.abs(yawRemainder) / (Math.PI * 0.25)
+      const halfWidth = halfPixelWidth(yawSector, y) * (1 - yawBlend) + halfPixelWidth(nextYawSector, y) * yawBlend
+      if (halfWidth < 1) continue
+      const radius = halfWidth / Math.sin(Math.PI * 70 / 180)
+
+      for (let x = Math.max(0, Math.floor(centerX - radius)); x <= Math.min(outputWidth - 1, Math.ceil(centerX + radius)); x++) {
+        const sine = (x + 0.5 - centerX) / radius
+        if (Math.abs(sine) >= 0.995) continue
+        const cameraAngle = Math.asin(sine)
+        let objectAngle = (cameraAngle + yawNormalized) % (Math.PI * 2)
+        if (objectAngle < 0) objectAngle += Math.PI * 2
+
+        const sector = Math.floor(objectAngle / halfTurn) % 4
+        const withinSector = objectAngle - sector * halfTurn
+        const nearestSector = withinSector < Math.PI * 0.25 ? sector : (sector + 1) % 4
+        const edgeBlend = Math.abs(withinSector - Math.PI * 0.25) / (Math.PI * 0.25)
+        const neighbor = withinSector < Math.PI * 0.25 ? (nearestSector + 3) % 4 : (nearestSector + 1) % 4
+        const neighborEdge = withinSector < Math.PI * 0.25 ? 1 : -1
+        const depth = radius * Math.cos(cameraAngle)
+        const perspective = cameraDistance / Math.max(cameraDistance * 0.65, cameraDistance - depth)
+        const sourceY = Math.max(0, Math.min(outputHeight - 1, Math.round(centerY + rowY / perspective)))
+        const targetOffset = (y * outputWidth + x) * 4
+        const [left, right] = bounds[nearestSector][sourceY]
+        const [neighborLeft, neighborRight] = bounds[neighbor][sourceY]
+        if (right <= left && neighborRight <= neighborLeft) continue
+        const center = (left + right) * 0.5
+        const neighborCenter = (neighborLeft + neighborRight) * 0.5
+        const sourceX = Math.max(left, Math.min(right, Math.round(center + (right - left) * 0.5 * neighborEdge * edgeBlend)))
+        const neighborX = Math.max(neighborLeft, Math.min(neighborRight, Math.round(neighborCenter + (neighborRight - neighborLeft) * 0.5 * -neighborEdge)))
+        const sourceOffset = (sourceY * outputWidth + sourceX) * 4
+        const neighborOffset = (sourceY * outputWidth + neighborX) * 4
+        const alphaA = right > left ? frames[nearestSector].data[sourceOffset + 3] / 255 : 0
+        const alphaB = neighborRight > neighborLeft ? frames[neighbor].data[neighborOffset + 3] / 255 : 0
+        const alpha = alphaA * (1 - edgeBlend) + alphaB * edgeBlend
+        if (alpha < 0.015) continue
+        const shade = 0.74 + Math.cos(cameraAngle) * 0.26
+        for (let channel = 0; channel < 3; channel++) {
+          const colorA = frames[nearestSector].data[sourceOffset + channel] * alphaA
+          const colorB = frames[neighbor].data[neighborOffset + channel] * alphaB
+          resultPixels[targetOffset + channel] = (colorA * (1 - edgeBlend) + colorB * edgeBlend) / alpha * shade
+        }
+        resultPixels[targetOffset + 3] = alpha * 255
+      }
+    }
+
+    ctx.putImageData(result, 0, 0)
   }
 
   /** Cached quadratic contours, in the character's 300-unit design space. */
@@ -597,11 +732,11 @@ export class WhaleStage3D {
     ctx.restore()
   }
 
-  private drawHeadband(ctx: CanvasRenderingContext2D, turn: number): void {
+  private drawHeadband(ctx: CanvasRenderingContext2D, turn: number, part: 'all' | 'band' | 'lace' = 'all'): void {
     ctx.save()
     ctx.translate(turn * 3, 0)
     ctx.scale(1 - Math.abs(turn) * 0.25, 1)
-    for (let i = 0; i <= 12; i++) {
+    if (part !== 'band') for (let i = 0; i <= 12; i++) {
       const a = Math.PI * (0.04 + i * 0.92 / 12)
       ctx.save()
       ctx.translate(70 * Math.cos(a), -25 - 76 * Math.sin(a))
@@ -613,7 +748,9 @@ export class WhaleStage3D {
       this.shape(ctx, 'M-5-3 L-4-5 M4-4 L5-6', '', '#c1b4ca', 0.6)
       ctx.restore()
     }
-    this.shape(ctx, 'M-70-29 Q-64-103 0-104 Q64-103 70-29 L67-28 Q60-98 0-99 Q-60-98-67-28 Z', '#303e70', '#22263e', 1.1)
+    if (part !== 'lace') {
+      this.shape(ctx, 'M-70-29 Q-64-103 0-104 Q64-103 0-99 Q-60-98-67-28 Z', '#303e70', '#22263e', 1.1)
+    }
     ctx.restore()
   }
 
@@ -648,15 +785,32 @@ export class WhaleStage3D {
         ctx.save()
         ctx.translate(0, -11 * blink)
         ctx.scale(1, 1 - blink * 0.9)
-        this.shape(ctx, 'M-10-9 Q0-15 10-9 Q12-2 9 9 Q6 14 0 14 Q-9 14-10 6 Z', '#fffaf5', '#8b697b', 0.65)
+        this.shape(ctx, 'M-10-9 Q0-15 10-9 Q12-2 9 9 Q6 14 0 14 Q-9 14-10 6 Z', '#fffaf5', '#8b697b', 0.8)
         const iris = this.gradient(ctx, -10, 14, ['#263869', '#3e71b1', '#87c5eb'])
-        this.oval(ctx, 0, 1.4, 8, 12, iris, '#425b8c')
-        this.oval(ctx, 0, -0.1, 2.4, 5, '#243659')
+        this.oval(ctx, 0, 1.4, 7.8, 11.8, iris, '#304875')
+        ctx.beginPath()
+        ctx.ellipse(0, 1.4, 6.9, 10.8, 0, Math.PI * 1.08, Math.PI * 1.92)
+        ctx.strokeStyle = 'rgba(200, 229, 246, 0.52)'
+        ctx.lineWidth = 0.8
+        ctx.stroke()
+        this.oval(ctx, 0, -0.1, 2.2, 5.2, '#243659', '#1c2c4a')
         this.oval(ctx, 0, 11.1, 4.1, 2.6, '#c3e5ef')
+        ctx.beginPath()
+        ctx.moveTo(-7, 8)
+        ctx.quadraticCurveTo(0, 15, 7, 8)
+        ctx.strokeStyle = 'rgba(73, 99, 142, 0.72)'
+        ctx.lineWidth = 0.7
+        ctx.stroke()
         this.oval(ctx, -3.2, -5.4, 2.3, 2.7, '#fffdf9')
+        ctx.beginPath()
+        ctx.ellipse(-3.2, -5.4, 2.3, 2.7, 0, 0, Math.PI * 2)
+        ctx.strokeStyle = '#d7f0fa'
+        ctx.lineWidth = 0.55
+        ctx.stroke()
         this.oval(ctx, 3.7, -3.8, 1, 1.3, '#cceaf8')
         this.shape(ctx, 'M-12-8 Q-6-15 2-13 Q8-13 11-9 L10-6 Q3-12-7-8 Z', '#292330', '', 0)
         this.shape(ctx, side < 0 ? 'M-9-9 L-14-13 L-12-7 L-8-6 Z' : 'M9-9 L14-13 L12-7 L8-6 Z', '#292330', '', 0)
+        this.shape(ctx, 'M-7-12 L-10-17 L-4-13 M0-14 L0-18 L3-13 M7-12 L11-16 L10-10', '#292330', '', 0)
         ctx.restore()
       }
       ctx.restore()
@@ -705,7 +859,7 @@ export class WhaleStage3D {
     this.shape(ctx,
       'M0-99 Q-57-101-69-49 Q-77-21-68 8 Q-64 24-44 24 L-39 17 Q-54 15-52-5 Q-47-34-25-59 Q-27-25-9-7 L-12-13 Q-2-3 10-2 Q26-26 23-58 Q39-37 43-14 Q53 0 48 13 L42 23 Q65 27 71 6 Q78-15 66-56 Q51-96 0-99 Z', hair, '#242b43', 1.25)
     this.shape(ctx, 'M-6-88 Q-25-91-43-69 Q-60-42-60-12 Q-62 8-52 17 M8-88 Q31-92 49-61 Q64-33 59 2 Q58 14 49 19 M-15-77 Q-24-53-21-30 M18-78 Q24-55 22-35', '', '#344475', 0.9)
-    this.shape(ctx, 'M-8-90 Q-19-96-30-81 Q-17-90-8-90 M8-90 Q17-96 27-82 Q16-91 8-90', '#303d69', '', 0)
+      this.shape(ctx, 'M-8-90 Q-19-96-30-81 Q-17-90-8-90 M8-90 Q17-96 27-82 Q16-91 8-90', '#303d69', '', 0)
     // Broken, vertical anime glints describe the crown without a plastic shine.
     for (const [x, y, rx, ry, angle] of [
       [-48, -66, 3.7, 7.1, 0.55], [-43, -61, 3, 4.7, 0.45],
@@ -734,11 +888,11 @@ export class WhaleStage3D {
       this.shape(ctx, 'M-3 3 Q0 7 3 3', '', '#c5a576', 0.7)
       ctx.restore()
     }
-    this.shape(ctx, 'M-2 59 L25 60 Q36 85 48 113 Q13 130-32 116 Q-18 76-2 59 Z', '#324370', '#252c46', 1.3)
-    this.shape(ctx, 'M-28 113 Q11 128 45 111 M-26 109 Q9 125 43 108', '', '#cfaf7b', 0.7)
+    this.shape(ctx, 'M1 59 L24 60 Q34 83 42 112 Q12 127-20 116 Q-11 77 1 59 Z', '#324370', '#252c46', 1.3)
+    this.shape(ctx, 'M-18 113 Q11 127 40 110 M-16 109 Q10 124 38 107', '', '#cfaf7b', 0.7)
     for (let i = 0; i < 7; i++) {
       ctx.save()
-      ctx.translate(-22 + i * 9, 111 + Math.sin(i / 6 * Math.PI) * 5)
+      ctx.translate(-15 + i * 7.6, 111 + Math.sin(i / 6 * Math.PI) * 5)
       this.shape(ctx, 'M-4 0 Q0 4 3 0 Q5-5 1-4 Q-2-4 0-1 M-1 1 Q-5-1-4-4', '', '#d2b17b', 0.7)
       ctx.restore()
     }
@@ -765,17 +919,21 @@ export class WhaleStage3D {
     this.oval(ctx, 36, 31, 1.8, 3, '#d6b77c')
     this.oval(ctx, 36.3, 31, 1, 2, '#77add7')
 
-    this.shape(ctx, 'M12-43 Q46-44 57-24 L59-1 Q68 5 64 8 L61 10 Q65 21 52 25 Q30 30 14 20 Q2 9 7-12 Z', skin, '#6d5870', 1.05)
+    this.oval(ctx, 12, 9, 6, 8, skin, '#947082')
+    this.shape(ctx, 'M15 7 Q12 10 16 14 M16 8 L19 11', '', '#bc929b', 0.65)
+    this.shape(ctx, 'M12-43 Q39-46 49-32 Q56-22 57-8 Q58-2 64 2 Q68 5 64 8 L60 9 Q64 12 61 14 Q64 18 59 20 Q58 27 46 28 Q28 30 14 20 Q4 12 5-3 Q7-23 12-43 Z', skin, '#6d5870', 1.05)
+    this.shape(ctx, 'M45-27 Q51-14 51-3 Q53 1 58 3', '', 'rgba(255,255,255,0.76)', 1.2)
+    this.oval(ctx, 45, 12, 8.5, 4.4, 'rgba(234,154,164,0.23)')
     ctx.save()
     ctx.translate(21, 0)
     this.drawEyes(ctx, elapsed, 1, true)
     ctx.restore()
     if (this.mouthLevel > 0.08) {
-      this.oval(ctx, 61, 17.5, 1.1, 0.7 + this.mouthLevel * 2, '#a06b7d')
+      this.oval(ctx, 62, 16, 1.3, 0.8 + this.mouthLevel * 1.8, '#9b5f73')
     } else {
-      this.shape(ctx, 'M59 17 Q61 16 62 18', '', '#9d7580', 0.8)
+      this.shape(ctx, 'M57 16 Q60 15 63 16.5 Q61 18 58.5 17.4 M59 18 Q61 19 62.5 18', '', '#9d6878', 0.8)
     }
-    this.oval(ctx, 12, 9, 6, 8, skin, '#947082')
+    this.shape(ctx, 'M54 8 Q57 8 60 9 M45 24 Q51 28 57 23', '', '#aa7b85', 0.65)
     // The forelock falls toward the eye; the longer cheek lock curls back to the collar.
     this.shape(ctx, 'M-25-97 Q20-106 45-80 Q54-59 54-29 Q58-11 65-8 L61-4 Q51-4 46-17 Q43-28 42-39 Q42-17 34-5 Q26 12 21 23 Q34 24 38 16 Q36 35 19 39 Q15 44 9 44 Q13 30 8 20 Q-3 4-1-15 Q-16-35-25-97 Z', hair, '#242b43', 1.25)
     this.shape(ctx, 'M4-89 Q29-79 35-49 Q39-21 24 7 Q13 23 19 30 M-10-83 Q8-71 10-43 Q7-9 15 12', '', '#344777', 0.9)

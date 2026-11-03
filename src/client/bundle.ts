@@ -298,27 +298,22 @@ function buildExports(_require?: any) {
         updatePetView()
       }
 
+      /**
+       * 每次对话投喂的大米饭合并成好几kg的一大碗，只播放一次清脆温和音效，避免连续密集音效打扰
+       */
       function animateMerit(delta: number, tokenDelta: number): void {
-        const count = Math.min(delta, MAX_VISUAL_BURST)
-        for (let i = 0; i < count; i++) {
-          const timer = setTimeout(() => {
-            burstTimers.delete(timer)
-            if (!alive) return
-            audioPlayer.playWoodenSound()
-            pet.animateKnock()
-            if (i === 0) {
-              const label =
-                tokenDelta > 0
-                  ? `⚡ ${formatTokenLabel(tokenDelta)} · 投喂 +${formatWhaleWeight(delta)}`
-                  : `🍚 投喂 +${formatWhaleWeight(delta)}`
-              pet.triggerKnockEffect(label)
-            } else {
-              pet.triggerKnockEffect(`🍚 投喂 +1kg`)
-            }
-            updatePetView()
-          }, i * 130)
-          burstTimers.add(timer)
-        }
+        if (!alive || delta <= 0) return
+        // 播放单次音效并触发单次动画
+        audioPlayer.playWoodenSound()
+        pet.animateKnock()
+
+        // 浮现合并后的一大碗白米饭提示
+        const label =
+          tokenDelta > 0
+            ? `⚡ ${formatTokenLabel(tokenDelta)} · 投喂大碗白米饭 +${formatWhaleWeight(delta)}`
+            : `🍚 投喂一大碗白米饭 +${formatWhaleWeight(delta)}`
+        pet.triggerKnockEffect(label)
+        updatePetView()
       }
 
       function applyState(
